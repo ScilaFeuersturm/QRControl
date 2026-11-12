@@ -170,3 +170,11 @@ def test_two_active_events_concurrency_and_archive(client):
     assert scan(client,token).json()['status']=='accepted'
     client.headers['Authorization']='Bearer '+'s'*32
     assert client.patch('/events/1/status',json={'active':False}).status_code==403
+
+
+def test_rejects_example_and_invalid_access_keys(client, monkeypatch):
+    for value in ['corta', 'generar-una-clave-larga-y-aleatoria', 'a' * 25 + ' ', 'a' * 25 + 'ñ']:
+        monkeypatch.setattr(main, 'ADMIN_KEY', value)
+        with pytest.raises(RuntimeError): main.validate_access_keys()
+    monkeypatch.setattr(main, 'ADMIN_KEY', 's' * 32)
+    with pytest.raises(RuntimeError): main.validate_access_keys()

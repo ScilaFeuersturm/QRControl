@@ -28,10 +28,17 @@ ADMIN_KEY = os.getenv('ADMIN_KEY', '')
 SCANNER_KEY = os.getenv('SCANNER_KEY', '')
 engine = build_engine(os.getenv('DATABASE_URL', 'sqlite:///' + os.getenv('DATABASE_PATH', 'zenit.sqlite3')))
 
+def validate_access_keys():
+    placeholders = {'generar-una-clave-larga-y-aleatoria', 'generar-otra-clave-diferente-y-aleatoria'}
+    for name, value in [('ADMIN_KEY', ADMIN_KEY), ('SCANNER_KEY', SCANNER_KEY)]:
+        if len(value) < 24 or value in placeholders or not all(33 <= ord(c) <= 126 for c in value):
+            raise RuntimeError(f'Configurá {name} con al menos 24 caracteres ASCII sin espacios; no uses el valor de ejemplo.')
+    if ADMIN_KEY == SCANNER_KEY:
+        raise RuntimeError('ADMIN_KEY y SCANNER_KEY deben ser diferentes.')
+
 @asynccontextmanager
 async def lifespan(app):
-    if len(ADMIN_KEY) < 24 or len(SCANNER_KEY) < 24 or ADMIN_KEY == SCANNER_KEY:
-        raise RuntimeError('Configurá claves diferentes con al menos 24 caracteres.')
+    validate_access_keys()
     initialize(engine, CAPACITY)
     yield
 
