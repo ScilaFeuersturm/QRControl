@@ -11,7 +11,9 @@ Desde `backend`, crear un entorno virtual, instalar `requirements.txt`, definir 
 
 Desde `mobile`, ejecutar `npm ci` y `npx expo start`. Ingresar la URL del servidor y la clave del equipo. Administración puede crear el primer evento desde «Administrar / crear eventos». La base genérica arranca sin eventos, salvo que se configure INITIAL_EVENT_NAME.
 
-Los archivos `.env.example` enumeran la configuración. Las variables del backend deben exportarse en el entorno; el backend no carga archivos .env automáticamente. Expo sí carga su archivo local .env. No poner claves de acceso en variables EXPO_PUBLIC.
+Guardá ambas claves en tu gestor de contraseñas. Para ingresarlas desde el celular, consultalas en tu terminal con `printenv ADMIN_KEY` y `printenv SCANNER_KEY`. No van en el código ni dentro de la APK. `.env.example` es una plantilla. El backend carga `backend/.env` automáticamente; las variables del proceso (como las de Render) tienen prioridad.
+
+Los archivos `.env.example` enumeran la configuración. El backend carga `backend/.env` si existe; las variables exportadas en el entorno tienen prioridad. Expo sí carga su archivo local .env. No poner claves de acceso en variables EXPO_PUBLIC.
 
 ## Configuración por cliente
 
@@ -46,3 +48,13 @@ Para producción: PostgreSQL compartido, HTTPS, protección contra abuso, copias
 Si se pierde una respuesta de ingreso, reconsultar la misma operación. Si se cierra la app o se pierde su referencia, conciliar el registro con administración antes de admitir personas. No se autoriza acceso sin conexión. Una copia del QR puede consumir primero el saldo: el personal debe comprobar al titular y contar las personas presentes.
 
 La auditoría npm informa alertas moderadas en herramientas Expo/ESLint/minimatch; revisar actualizaciones compatibles antes de la entrega productiva. No hay pagos automáticos, envíos automáticos a redes sociales, soporte offline ni publicación en tiendas.
+
+## Corrección de acceso 1.0.1
+
+La app toma la URL de EXPO_PUBLIC_API_URL si está definida, valida URL y clave antes de conectar, dispone de un ojo para mostrar/ocultar y espera hasta 90 segundos al despertar el servidor. La clave incorrecta se informa separada de una falla de red. Los ingresos conservan sus identificadores de operación y no se reintentan automáticamente.
+
+Las claves locales se guardan en `backend/.env`, ignorado por Git, y se cargan mediante python-dotenv. El archivo `.env.example` no guarda las claves reales. Cambiar el archivo local no cambia un servidor ya desplegado: actualizar allí ADMIN_KEY y SCANNER_KEY y desplegar para activarlas. Ambas deben ser distintas, tener al menos 24 caracteres y utilizar caracteres ASCII sin espacios ni saltos de línea.
+
+El backend acepta peticiones de otros orígenes (CORS) para poder usar la app web; se puede restringir con CORS_ORIGINS, separando los orígenes con comas.
+
+Pruebas de red de la app: desde `mobile`, `npm run test:network`.

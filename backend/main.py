@@ -7,9 +7,14 @@ import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from uuid import UUID
+from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).with_name('.env'), override=False)
 
 import qrcode
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, field_validator
@@ -34,6 +39,8 @@ async def lifespan(app):
     yield
 
 app = FastAPI(title=os.getenv('BRAND_NAME', 'QRControl'), version='0.2.0', lifespan=lifespan)
+# La autenticación usa el header Authorization (sin cookies), por eso permitir cualquier origen no expone sesiones.
+app.add_middleware(CORSMiddleware, allow_origins=[o.strip() for o in os.getenv('CORS_ORIGINS', '*').split(',') if o.strip()], allow_methods=['*'], allow_headers=['Authorization', 'Content-Type', 'Accept'])
 security = HTTPBearer()
 
 def role(credentials: HTTPAuthorizationCredentials = Depends(security)):
