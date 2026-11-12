@@ -14,23 +14,27 @@ load_dotenv(Path(__file__).with_name('.env'), override=False)
 
 import qrcode
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import case, func, select
 from sqlalchemy.exc import SQLAlchemyError
 
-from database import build_engine, events, initialize, orders, scans, transaction
+from database import build_engine, events, initialize, orders, scanner_users, scans, transaction
 from ticket_design import render_ticket
 
 CAPACITY = int(os.getenv('EVENT_CAPACITY', '84'))
 ADMIN_KEY = os.getenv('ADMIN_KEY', '')
 SCANNER_KEY = os.getenv('SCANNER_KEY', '')
+MAX_SCANNER_USERS = int(os.getenv('MAX_SCANNER_USERS', '3'))
 engine = build_engine(os.getenv('DATABASE_URL', 'sqlite:///' + os.getenv('DATABASE_PATH', 'zenit.sqlite3')))
 
 def validate_access_keys():
     placeholders = {'generar-una-clave-larga-y-aleatoria', 'generar-otra-clave-diferente-y-aleatoria'}
+    # SCANNER_KEY es opcional: si está vacía, solo ingresan los usuarios de escaneo creados por administración.
     for name, value in [('ADMIN_KEY', ADMIN_KEY), ('SCANNER_KEY', SCANNER_KEY)]:
+        if name == 'SCANNER_KEY' and not value: continue
         if len(value) < 24 or value in placeholders or not all(33 <= ord(c) <= 126 for c in value):
             raise RuntimeError(f'Configurá {name} con al menos 24 caracteres ASCII sin espacios; no uses el valor de ejemplo.')
     if ADMIN_KEY == SCANNER_KEY:
@@ -43,12 +47,22 @@ async def lifespan(app):
     yield
 
 app = FastAPI(title='Zenit Control QR', version='0.2.0', lifespan=lifespan)
+# La autenticación usa el header Authorization (sin cookies), por eso permitir cualquier origen no expone sesiones.
+app.add_middleware(CORSMiddleware, allow_origins=[o.strip() for o in os.getenv('CORS_ORIGINS', '*').split(',') if o.strip()], allow_methods=['*'], allow_headers=['Authorization', 'Content-Type', 'Accept'])
 security = HTTPBearer()
 
-def role(credentials: HTTPAuthorizationCredentials = Depends(security)):
-    if hmac.compare_digest(credentials.credentials, ADMIN_KEY): return 'admin'
-    if hmac.compare_digest(credentials.credentials, SCANNER_KEY): return 'scanner'
+def hash_key(key): return hashlib.sha256(key.encode()).hexdigest()
+
+def identify(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    key = credentials.credentials
+    if hmac.compare_digest(key, ADMIN_KEY): return 'admin', 'Administración'
+    if SCANNER_KEY and hmac.compare_digest(key, SCANNER_KEY): return 'scanner', 'Escaneo'
+    with engine.connect() as db:
+        name = db.scalar(select(scanner_users.c.name).where(scanner_users.c.key_hash == hash_key(key)))
+    if name is not None: return 'scanner', name
     raise HTTPException(401, 'Credencial incorrecta')
+
+def role(identity=Depends(identify)): return identity[0]
 
 def admin(current=Depends(role)):
     if current != 'admin': raise HTTPException(403, 'Solo administración')
@@ -119,7 +133,44 @@ def health():
         raise HTTPException(503, 'Base de datos no disponible') from None
     return {'status': 'ok'}
 @app.get('/session')
-def session(current=Depends(role)): return {'role': current}
+def session(identity=Depends(identify)):
+    return {'role': identity[0], 'name': identity[1]}
+
+class NewScannerUser(BaseModel):
+    name: str = Field(min_length=1, max_length=60)
+    @field_validator('name')
+    @classmethod
+    def nonblank(cls, value):
+        if not value.strip(): raise ValueError('Ingresá un nombre')
+        return value.strip()
+
+def public_scanner(row): return {'id': row['id'], 'name': row['name'], 'created_at': row['created_at']}
+
+@app.get('/scanner-users', dependencies=[Depends(admin)])
+def list_scanner_users():
+    with engine.connect() as db:
+        rows = db.execute(select(scanner_users).order_by(scanner_users.c.id)).mappings()
+        return {'max': MAX_SCANNER_USERS, 'users': [public_scanner(r) for r in rows]}
+
+@app.post('/scanner-users', status_code=201, dependencies=[Depends(admin)])
+def create_scanner_user(data: NewScannerUser):
+    with transaction(engine, quota=True) as db:
+        if db.scalar(select(func.count()).select_from(scanner_users)) >= MAX_SCANNER_USERS:
+            raise HTTPException(409, f'Ya hay {MAX_SCANNER_USERS} usuarios de escaneo. Eliminá uno para crear otro.')
+        if db.scalar(select(scanner_users.c.id).where(func.lower(scanner_users.c.name) == data.name.lower())) is not None:
+            raise HTTPException(409, 'Ya existe un usuario con ese nombre')
+        key = secrets.token_urlsafe(24)
+        result = db.execute(scanner_users.insert().values(name=data.name, key_hash=hash_key(key), created_at=now()))
+        row = db.execute(select(scanner_users).where(scanner_users.c.id == result.inserted_primary_key[0])).mappings().one()
+        # La clave se devuelve una sola vez; después no se puede recuperar, solo eliminar el usuario y crear otro.
+        return {**public_scanner(row), 'key': key}
+
+@app.delete('/scanner-users/{user_id}', status_code=204, dependencies=[Depends(admin)])
+def delete_scanner_user(user_id: int):
+    with transaction(engine, quota=True) as db:
+        if db.execute(scanner_users.delete().where(scanner_users.c.id == user_id)).rowcount == 0:
+            raise HTTPException(404, 'Usuario inexistente')
+    return Response(status_code=204)
 
 @app.get('/events', dependencies=[Depends(role)])
 def list_events():

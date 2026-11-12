@@ -127,4 +127,10 @@ La app propone la URL online por defecto, valida URL y clave antes de conectar, 
 
 Las claves locales se guardan en `backend/.env`, ignorado por Git, y se cargan mediante python-dotenv. El archivo `.env.example` no guarda las claves reales. Cambiar el archivo local no cambia Render: actualizar allí ADMIN_KEY y SCANNER_KEY y desplegar para activarlas. Ambas deben ser distintas, tener al menos 24 caracteres y utilizar caracteres ASCII sin espacios ni saltos de línea.
 
+## Usuarios de escaneo
+
+Desde «Mis eventos» → «Usuarios de escaneo», administración crea hasta tres usuarios (MAX_SCANNER_USERS). Cada uno recibe una clave propia que se muestra una sola vez; en la base se guarda solo su hash. Con esa clave el usuario entra a la app y solo puede consultar QR y registrar ingresos. Eliminar un usuario revoca su acceso de inmediato. SCANNER_KEY es opcional: si queda configurada, sigue funcionando como una clave de escaneo compartida adicional; para que solo ingresen los tres usuarios, dejarla vacía o eliminarla en el servidor.
+
+Administración puede trabajar desde la PC con la versión web: desde `mobile`, `npm run web`.
+
 Pruebas de red de la app: desde `mobile`, `npm run test:network`.

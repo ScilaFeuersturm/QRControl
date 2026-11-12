@@ -1,9 +1,9 @@
 import { normalizeServerUrl, normalizeTeamKey, requestJson } from '../lib/api';
 import { useEffect, useRef, useState } from 'react';
-import { Alert, ScrollView, Text } from 'react-native';
+import { ScrollView, Text } from 'react-native';
 import { router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Button, Card, Field, PasswordField, styles as s } from '../components/ui';
+import { Button, Card, Field, PasswordField, notify, styles as s } from '../components/ui';
 import { useSession } from '../state/session';
 import type { Event } from '../state/session';
 export default function Login() {
@@ -16,7 +16,7 @@ export default function Login() {
  async function connect() {
   if (pending.current) return;
   let base: string, teamKey: string;
-  try {base = normalizeServerUrl(url); teamKey = normalizeTeamKey(key);} catch (e) {Alert.alert('Revisá los datos', e instanceof Error ? e.message : 'URL o clave incorrecta'); return;}
+  try {base = normalizeServerUrl(url); teamKey = normalizeTeamKey(key);} catch (e) {notify('Revisá los datos', e instanceof Error ? e.message : 'URL o clave incorrecta'); return;}
   const controller = new AbortController(); pending.current = controller;
   setBusy(true); setEvents([]); setRole(''); setStage('Conectando al servidor…');
   try {
@@ -25,7 +25,7 @@ export default function Login() {
    const auth = await requestJson<{role: string}>(base, '/session', {key: teamKey, signal: controller.signal});
    const list = await requestJson<Event[]>(base, '/events', {key: teamKey, signal: controller.signal});
    setUrl(base); setKey(teamKey); setRole(auth.role); setEvents(list);
-  } catch (e) {if (!controller.signal.aborted) Alert.alert('No se pudo conectar', e instanceof Error ? e.message : 'Revisá la conexión');}
+  } catch (e) {if (!controller.signal.aborted) notify('No se pudo conectar', e instanceof Error ? e.message : 'Revisá la conexión');}
   finally {pending.current = null; setBusy(false); setStage('');}
  }
  return <SafeAreaView style={s.screen}><ScrollView contentContainerStyle={s.content} keyboardShouldPersistTaps="handled"><Text style={s.brand}>ZENIT / ACCESS</Text><Text style={s.title}>Una noche única.{'\n'}Cada ingreso cuenta.</Text><Text style={s.muted}>Gestión de entradas y recepción</Text>

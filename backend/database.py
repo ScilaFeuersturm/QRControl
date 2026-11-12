@@ -31,6 +31,10 @@ scans = Table('event_scan_logs', metadata,
     Column('scanned_at', String(50), nullable=False),
     Column('request_id', String(36), unique=True), Column('fingerprint', String(64)),
     Column('response_json', Text))
+# Usuarios de escaneo creados por administración. Solo se guarda el hash de su clave.
+scanner_users = Table('scanner_users', metadata,
+    Column('id', Integer, primary_key=True), Column('name', String(60), nullable=False, unique=True),
+    Column('key_hash', String(64), nullable=False, unique=True), Column('created_at', String(50), nullable=False))
 
 
 def build_engine(url):

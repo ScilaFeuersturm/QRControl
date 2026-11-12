@@ -32,3 +32,8 @@ test('caller cancellation is propagated', async () => {
  const request=requestJson('https://example.com','/health', {signal:controller.signal}); controller.abort();
  await assert.rejects(request, /cancelada/);
 });
+
+test('accepts 204 responses without body', async () => {
+  globalThis.fetch = async () => new Response(null, {status: 204});
+  assert.equal(await requestJson('https://api.example.com', '/scanner-users/1', {method: 'DELETE'}), null);
+});
