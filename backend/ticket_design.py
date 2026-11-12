@@ -8,7 +8,7 @@ from pathlib import Path
 import qrcode
 from PIL import Image, ImageDraw, ImageFont
 
-GOLD = '#EAC780'
+GOLD = os.getenv('TICKET_ACCENT_COLOR', '#93D5C9')
 WHITE = '#FFF6DF'
 
 def font(size, serif=False, italic=False):
@@ -66,16 +66,12 @@ def render_ticket(event, ticket, demo=False):
         for i,line in enumerate(lines):centered(line,y+i*height,size,max_width=max_width,**kwargs)
         return y+len(lines)*height
 
-    centered('ZENIT', 85, 50, GOLD, serif=True)
+    centered(os.getenv('BRAND_NAME', 'QRControl'), 85, 50, GOLD, serif=True)
     centered('E V E N T O S', 145, 16, GOLD)
-    centered('UNA NOCHE PARA DESCUBRIR', 275, 20, GOLD)
+    centered('TU ENTRADA DIGITAL', 275, 20, GOLD)
     name=event['name'].removeprefix('PRUEBA · ')
-    if name == 'Los Secretos del Destino':
-        centered('Los Secretos', 325, 86, GOLD, serif=True, italic=True)
-        centered('del Destino', 425, 86, GOLD, serif=True, italic=True)
-    else:
-        wrapped(name, 335, 70, serif=True, italic=True, fill=GOLD, max_width=770, max_height=175)
-    centered('Una noche. Doce puertas. Infinitas posibilidades.', 540, 23, serif=True, italic=True)
+    wrapped(name, 335, 70, serif=True, italic=True, fill=GOLD, max_width=770, max_height=175)
+    centered('Cada ingreso cuenta.', 540, 23, serif=True, italic=True)
     draw.rounded_rectangle((170, 607, 830, 675), radius=10, fill=GOLD)
     qty=ticket['quantity']
     centered('ENTRADA INDIVIDUAL' if qty==1 else f'ENTRADA GRUPAL · {qty} PERSONAS', 622, 30, fill='#101E34', serif=True)
@@ -83,7 +79,7 @@ def render_ticket(event, ticket, demo=False):
     wrapped(ticket['name'], 751, 36, max_width=800, line_height=43)
     centered(f"Mesa {ticket['table_name'] or 'sin asignar'} · Válida para {qty} {'persona' if qty==1 else 'personas'}", 855, 25)
     qr=qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=9, border=4)
-    qr.add_data('ZENIT:'+ticket['token']);qr.make(fit=True)
+    qr.add_data('QRCONTROL:'+ticket['token']);qr.make(fit=True)
     code=qr.make_image(fill_color='black',back_color='white').convert('RGB')
     # Módulos enteros para conservar bordes y zona de silencio.
     module_count=qr.modules_count+8

@@ -1,122 +1,48 @@
-# Zenit Access · versión 0.2
+# QRControl
 
-Expo SDK 58 + Expo Router + FastAPI. Cada compra tiene un titular, una cantidad de personas y un único QR generado al confirmar el pago. El evento inicial tiene 84 plazas. Los ingresos pueden ser parciales y quedan registrados contra el mismo saldo central.
+Base genérica para gestión de eventos y control de acceso mediante QR, con Expo SDK 58, Expo Router y FastAPI. Cada compra tiene un titular, una cantidad de personas, un pago confirmado manualmente y un QR con saldo para ingresos parciales.
 
-## Backend local
+- `main`: producto genérico configurable por instalación.
+- `zenit`: personalización Los Secretos del Destino, control de acceso el 6 de diciembre de 2026, cupo inicial de 84 personas y evento de ensayo separado.
 
-Requiere Python 3.11 o posterior. Desde `backend`:
+## Ejecutar
 
-```sh
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-export ADMIN_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
-export SCANNER_KEY="$(python3 -c 'import secrets; print(secrets.token_urlsafe(32))')"
-export EVENT_CAPACITY=84
-uvicorn main:app --host 0.0.0.0 --port 8000
-```
+Desde `backend`, crear un entorno virtual, instalar `requirements.txt`, definir ADMIN_KEY y SCANNER_KEY con claves aleatorias distintas de al menos 24 caracteres y ejecutar `uvicorn main:app --host 0.0.0.0 --port 8000`.
 
-Guardá ambas claves en tu gestor de contraseñas. Para ingresarlas desde el celular, consultalas en tu terminal con `printenv ADMIN_KEY` y `printenv SCANNER_KEY`. No van en el código ni dentro de la APK. `.env.example` es una referencia y no se carga automáticamente.
+Desde `mobile`, ejecutar `npm ci` y `npx expo start`. Ingresar la URL del servidor y la clave del equipo. Administración puede crear el primer evento desde «Administrar / crear eventos». La base genérica arranca sin eventos, salvo que se configure INITIAL_EVENT_NAME.
 
-SQLite se usa por defecto; los datos quedan en `backend/zenit.sqlite3`. Para PostgreSQL configurar `DATABASE_URL=postgresql+psycopg://usuario:clave@host:5432/zenit`. En ese caso DATABASE_URL tiene prioridad sobre DATABASE_PATH. El cupo inicial se establece solo al crear la base: cambiar EVENT_CAPACITY después no modifica eventos existentes.
+Los archivos `.env.example` enumeran la configuración. Las variables del backend deben exportarse en el entorno; el backend no carga archivos .env automáticamente. Expo sí carga su archivo local .env. No poner claves de acceso en variables EXPO_PUBLIC.
 
-## App
+## Configuración por cliente
 
-Desde `mobile`:
+Backend: BRAND_NAME, TICKET_ACCENT_COLOR, MAX_ACTIVE_EVENTS (por defecto 2), DATABASE_URL o DATABASE_PATH. Para precargar un evento nuevo: INITIAL_EVENT_NAME, INITIAL_EVENT_DATE, INITIAL_EVENT_VENUE y EVENT_CAPACITY.
 
-```sh
-npm ci
-npx expo start
-```
+App: EXPO_PUBLIC_BRAND_NAME, EXPO_PUBLIC_ACCENT_COLOR y EXPO_PUBLIC_API_URL. El esquema, nombre de aplicación e identificadores Android/iOS se definen en `mobile/app.json`. Esta rama no está asociada al proyecto Expo de Zenit: asociar un proyecto de Expo propio al compilar para un cliente.
 
-Abrir con Expo Go compatible o un development build. Ingresar la URL del servidor y una clave. En un celular físico usar la IP LAN de la computadora, por ejemplo `http://192.168.1.10:8000`, con ambos en la misma red. `localhost` en el celular apunta al propio teléfono. La URL es editable en el inicio y no necesita recompilar la app. HTTP sirve para desarrollo local; en producción usar HTTPS.
+El límite de eventos activos se consulta al servidor y se valida también en cada creación o reactivación. El diseño de invitación está en `backend/ticket_design.py`.
 
-La pantalla inicial permite elegir el evento. Después se abre la lista de invitados. Administración puede registrar compras, confirmar pagos y compartir entradas. Recepción puede consultar la lista y validar ingresos, sin acceder a teléfonos ni emitir entradas.
+## Operación
 
-## Flujo acordado
+Crear un evento con fecha, lugar y capacidad. Registrar titular, teléfono, mesa y cantidad; al confirmar manualmente el pago se asignan las plazas disponibles y se genera el QR. La reserva sin pagar no ocupa cupo ni tiene QR. Compartir abre el selector del dispositivo para enviar la invitación PNG por aplicaciones compatibles.
 
-1. Registrar titular, teléfono, mesa y cantidad. Marcar «Ya verifiqué el pago» si corresponde, o dejar pendiente.
-2. El pago se verifica manualmente fuera de la app. Al confirmarlo, el servidor asigna el cupo y genera el token QR aleatorio. Una reserva pendiente no bloquea cupo.
-3. La invitación PNG incluye evento, fecha, lugar, titular, mesa, cantidad y QR. Compartir abre el selector nativo para elegir una aplicación instalada. WhatsApp, Mensajes u otras aparecen según lo que admita cada dispositivo. La posibilidad de adjuntar por mensaje directo de Instagram depende de esa aplicación; también se puede guardar la imagen y adjuntarla manualmente. No hay envíos automáticos ni confirmación de entrega.
-4. Recepción escanea: primero ve titular y saldo, sin consumir entradas. Selecciona cuántas personas están presentes y confirma.
-5. Una compra para cuatro admite, por ejemplo, dos ahora y otras dos después. El saldo se valida de forma atómica en el servidor. Ningún escaneo puede exceder la cantidad pagada.
-6. La lista muestra titular, mesa y «ingresaron X de Y». Se registran cantidades por grupo, no nombres individuales de acompañantes. Las filas visibles y los totales se actualizan cada tres segundos; también al volver del escáner y al deslizar para actualizar. La lista usa paginación y filtros.
+Recepción consulta el QR y confirma cuántas personas entran. El grupo puede llegar por separado. El servidor impide superar el saldo y las confirmaciones usan un identificador único para que reintentar la misma operación no duplique ingresos. Las filas visibles y totales se actualizan cada tres segundos. Los acompañantes se cuentan por grupo; no se registran sus identidades individuales.
 
-El QR codifica un token secreto, no el nombre ni la cantidad como datos confiables editables. El nombre, evento y cantidad se imprimen en la invitación y se consultan desde el servidor al leerlo. Una captura copiada puede ser usada antes por otra persona: recepción debe comprobar el titular y contar a quienes efectivamente ingresan. No hay reingreso después de consumir el saldo.
+Archivar un evento conserva el historial y bloquea nuevas operaciones. Reactivarlo respeta el límite de eventos activos. Todas las claves son globales por rol para esta instalación: esta base no es un SaaS con aislamiento entre organizaciones.
 
-## Red y operaciones pendientes
+## Pruebas
 
-Tres o más celulares deben usar el mismo servidor y la misma base. El servidor serializa cambios de cupo por evento y registra cada confirmación con un identificador único. Reconsultar esa misma operación tras una desconexión devuelve el resultado original sin descontar de nuevo.
+Backend: `.venv/bin/python -m pytest -q`. App: `npm run typecheck` y `npm run lint`. Para diez QR ficticios dentro de un evento separado, ejecutar `python seed_demo.py --output demo-qr`. Usar la misma base de datos en la API. `--reset` rota solo esos códigos y restablece su asistencia. El ensayo ocupa un lugar de evento activo.
 
-Si la app muestra una operación sin confirmar, no se debe autorizar el acceso ni comenzar una operación nueva. Pulsar «Reconsultar la misma operación». La referencia se conserva en memoria mientras la pantalla siga montada. Si se cierra la app, se cambia de pantalla o se pierde esa referencia, consultar el registro con administración y conciliar el ingreso antes de continuar. Sin conexión no se autoriza el acceso.
+La compatibilidad con el prefijo QR anterior se conserva para migraciones. El código QR no contiene nombre ni cantidad como información editable confiable: esos datos se imprimen en la invitación y se consultan desde el servidor.
 
-## Diez QR de ensayo
+## Despliegue y APK
 
-Desde `backend`, antes de iniciar la API:
+`render.yaml` define una API gratuita y requiere una cadena PostgreSQL externa con TLS. No almacena SQLite en el disco efímero de Render. Una opción es Neon Free, sujeto a sus límites vigentes. Las claves las genera Render y se consultan en el panel Environment. No se despliega esta rama genérica automáticamente al servicio Zenit.
 
-```sh
-source .venv/bin/activate
-python seed_demo.py --output demo-qr
-```
+`mobile/eas.json` incluye un perfil preview para APK. Asociar primero el proyecto Expo correcto y ejecutar `npx eas-cli@latest build --platform android --profile preview`. Solo preview/development permiten HTTP local; producción requiere HTTPS en Android. No se compiló una APK genérica en esta entrega; la compilación Zenit es independiente.
 
-Crea un evento separado llamado «PRUEBA · Los Secretos del Destino» y diez compras pagadas: grupos de una, dos y tres personas (19 plazas de prueba). No consume ninguna plaza del evento real. El script es repetible: sin `--reset` conserva QR y asistencia; con `--reset` restablece solo ese evento de prueba y rota sus QR, invalidando los anteriores.
+Para producción: PostgreSQL compartido, HTTPS, protección contra abuso, copias de seguridad, monitoreo, pruebas de carga y prueba real de cámara/compartir en los equipos acordados. SQLite sirve para desarrollo y una sola instancia con disco persistente. DATABASE_SCHEMA opcional permite un esquema PostgreSQL exclusivo; cambiar DATABASE_URL no migra datos automáticamente.
 
-```sh
-python seed_demo.py --reset --output demo-qr
-```
+Si se pierde una respuesta de ingreso, reconsultar la misma operación. Si se cierra la app o se pierde su referencia, conciliar el registro con administración antes de admitir personas. No se autoriza acceso sin conexión. Una copia del QR puede consumir primero el saldo: el personal debe comprobar al titular y contar las personas presentes.
 
-La carpeta generada contiene diez invitaciones PNG y un `manifest.json` con los códigos de ensayo. Seleccionar el evento PRUEBA en la app. Los PNG y la API deben usar la misma base de datos: si se vuelve a generar el ensayo en una base nueva, se deben reemplazar las imágenes.
-
-La entrega también incluye una base de pruebas y diez PNG ya vinculados a ella dentro de `Pruebas-Zenit.zip`; seguir su INSTRUCCIONES.md. Son solo para ensayo.
-
-## APK
-
-Proyecto asociado a la cuenta Expo de la usuaria. El código de la app y la configuración de compilación están en la carpeta `mobile`.
-
-El perfil `preview` de `mobile/eas.json` genera un APK Android instalable. Este perfil permite HTTP para ensayar contra la computadora en la red local. El perfil `production` mantiene bloqueado el tráfico HTTP en Android y debe apuntar a un servicio HTTPS. El plugin de red local se configura en `mobile/plugins/withLocalTestNetwork.js`.
-
-Para compilar:
-
-```sh
-cd mobile
-npx eas-cli@latest login
-npx eas-cli@latest build --platform android --profile preview
-```
-
-El build requiere cuenta de Expo, proyecto asociado y credenciales Android. Las claves del backend se ingresan al abrir la app. La exportación Metro por sí sola no es una APK.
-
-## Crecer a otros eventos
-
-Desde «Mis eventos», administración puede crear eventos indicando nombre, fecha, lugar y cupo. El servidor permite como máximo dos eventos activos, incluso con creaciones simultáneas. Para abrir otro se puede archivar uno, sin borrar invitados ni historial; archivar bloquea nuevas compras, pagos, emisión e ingresos. Reactivar también respeta el límite. El evento de prueba ocupa uno de esos dos lugares.
-
-Las compras y escaneos pertenecen a un evento. POST `/events` con clave de administración crea otro evento con nombre, fecha, lugar y capacidad; se elige desde la app. Los endpoints usan `event_id`; los QR de un evento no sirven en otro.
-
-El acceso a la base está implementado con SQLAlchemy tanto para SQLite como para PostgreSQL. En PostgreSQL las escrituras bloquean la fila del evento; SQLite usa una transacción de escritura inmediata. Para un servicio con varios procesos/instancias usar PostgreSQL compartido. SQLite queda para desarrollo o una sola instancia con disco persistente. La versión se verificó automáticamente con SQLite; PostgreSQL no fue probado contra un servidor real en esta entrega. Antes de vender para un aforo mayor se necesitan prueba de integración PostgreSQL, pruebas de carga, monitoreo y una política de cuentas individuales por operador. Las claves actuales son globales por rol para todos los eventos y no son adecuadas para alojar organizadores independientes.
-
-La inicialización crea tablas y el evento inicial. Al encontrar la base de la primera versión, migra compras pagadas conservando sus tokens y asistencia; pendientes quedan sin token. Hacer backup antes de actualizar. Inicializar el esquema una vez antes de levantar múltiples procesos. Para futuras modificaciones de esquema incorporar migraciones versionadas; `create_all` no altera tablas existentes. Cambiar DATABASE_URL no copia automáticamente datos entre bases.
-
-## Diseño
-
-La entrada azul y dorada se genera en `backend/ticket_design.py`, con composición propia, luna, estrellas y silueta de costa. Es una adaptación visual de la referencia. No reproduce retratos ni logos originales: requieren los archivos autorizados para la pieza definitiva. El QR se dibuja siempre desde los datos de esa compra. Para tipografía consistente en Linux instalar DejaVu o definir TICKET_FONT y TICKET_SERIF_FONT con rutas locales a fuentes autorizadas.
-
-## Validación
-
-- Backend: desde `backend`, `.venv/bin/python -m pytest -q`.
-- App: desde `mobile`, `npm run typecheck` y `npm run lint`.
-- Exportación Android: `npx expo export --platform android`.
-
-Las pruebas cubren ingresos parciales, concurrencia, reintentos idempotentes, cupo de 84 bajo pagos simultáneos, emisión solo al pagar, revocación, permisos, separación de eventos, paginación, filtros, migración inicial y diez compras de ensayo.
-
-Antes del evento hacer una prueba en los tres celulares reales: cámara, confirmación parcial, simultaneidad, compartir por las aplicaciones necesarias y cortes de red. Falta desplegar la API con HTTPS, persistencia, backups y protección contra abuso, y ensayar la restauración sin perder ingresos recientes. No se debe restaurar un backup durante el acceso sin conciliación.
-
-No incluye integración bancaria, pasarela de pago, WhatsApp API, Instagram API, validación offline, identificación individual de acompañantes ni publicación en tiendas. No se ha probado cámara ni selector de compartir en hardware real.
-
-## Auditoría de dependencias
-
-La auditoría npm de esta versión informa diez alertas moderadas en herramientas de Expo/ESLint y minimatch; no informa alertas altas ni críticas. No se aplicaron cambios de versión mayor sugeridos automáticamente. Revisar la actualización compatible antes de la puesta en producción. El lockfile conserva la instalación comprobada.
-
-## Despliegue de Zenit
-
-El evento se controla el **6 de diciembre de 2026**. El Blueprint `render.yaml` apunta a la rama `zenit`, usa una API gratuita de Render y requiere DATABASE_URL de un PostgreSQL externo (por ejemplo Neon Free) con TLS. No usa la base Render existente que vence ese día. Las claves ADMIN_KEY y SCANNER_KEY son generadas por Render y se consultan en la sección Environment del nuevo servicio. La API inicializa el evento real y el ensayo por separado. No compartir la cadena de conexión ni las claves en el repositorio.
-
-Ramas acordadas: `zenit` conserva esta personalización; `main` contiene QRControl genérico.
+La auditoría npm informa alertas moderadas en herramientas Expo/ESLint/minimatch; revisar actualizaciones compatibles antes de la entrega productiva. No hay pagos automáticos, envíos automáticos a redes sociales, soporte offline ni publicación en tiendas.

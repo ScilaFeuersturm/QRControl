@@ -19,7 +19,9 @@ from sqlalchemy.exc import SQLAlchemyError
 from database import build_engine, events, initialize, orders, scans, transaction
 from ticket_design import render_ticket
 
-CAPACITY = int(os.getenv('EVENT_CAPACITY', '84'))
+CAPACITY = int(os.getenv('EVENT_CAPACITY', '100'))
+MAX_ACTIVE_EVENTS = int(os.getenv('MAX_ACTIVE_EVENTS', '2'))
+if MAX_ACTIVE_EVENTS < 1: raise ValueError('MAX_ACTIVE_EVENTS debe ser positivo')
 ADMIN_KEY = os.getenv('ADMIN_KEY', '')
 SCANNER_KEY = os.getenv('SCANNER_KEY', '')
 engine = build_engine(os.getenv('DATABASE_URL', 'sqlite:///' + os.getenv('DATABASE_PATH', 'zenit.sqlite3')))
@@ -31,7 +33,7 @@ async def lifespan(app):
     initialize(engine, CAPACITY)
     yield
 
-app = FastAPI(title='Zenit Control QR', version='0.2.0', lifespan=lifespan)
+app = FastAPI(title=os.getenv('BRAND_NAME', 'QRControl'), version='0.2.0', lifespan=lifespan)
 security = HTTPBearer()
 
 def role(credentials: HTTPAuthorizationCredentials = Depends(security)):
@@ -108,7 +110,7 @@ def health():
         raise HTTPException(503, 'Base de datos no disponible') from None
     return {'status': 'ok'}
 @app.get('/session')
-def session(current=Depends(role)): return {'role': current}
+def session(current=Depends(role)): return {'role': current, 'max_active_events': MAX_ACTIVE_EVENTS}
 
 @app.get('/events', dependencies=[Depends(role)])
 def list_events():
@@ -122,8 +124,8 @@ def create_event(data: NewEvent):
         return dict(get_event(db, result.inserted_primary_key[0]))
 
 def require_event_slot(db):
-    if db.scalar(select(func.count()).select_from(events).where(events.c.active.is_(True))) >= 2:
-        raise HTTPException(409, 'Ya hay dos eventos activos. Archivá uno antes de crear o reactivar otro.')
+    if db.scalar(select(func.count()).select_from(events).where(events.c.active.is_(True))) >= MAX_ACTIVE_EVENTS:
+        raise HTTPException(409, f'Ya hay {MAX_ACTIVE_EVENTS} eventos activos. Archivá uno antes de crear o reactivar otro.')
 
 @app.patch('/events/{event_id}/status', dependencies=[Depends(admin)])
 def event_status(event_id: int, data: EventStatus):
@@ -195,7 +197,7 @@ def paid_ticket(ticket_id, event_id):
 def ticket_qr(ticket_id: int, event_id: int = 1):
     row, _ = paid_ticket(ticket_id, event_id)
     buffer = io.BytesIO()
-    qrcode.make('ZENIT:' + row['token']).save(buffer, format='PNG')
+    qrcode.make('QRCONTROL:' + row['token']).save(buffer, format='PNG')
     return Response(buffer.getvalue(), media_type='image/png', headers={'Cache-Control': 'no-store'})
 
 @app.get('/tickets/{ticket_id}/invitation', dependencies=[Depends(admin)])
@@ -205,7 +207,7 @@ def invitation(ticket_id: int, event_id: int = 1):
 
 def find_token(db, token, event_id):
     value = token.strip()
-    value = value[6:] if value.startswith('ZENIT:') else ''
+    value = value.split(':', 1)[1] if value.startswith(('QRCONTROL:', 'ZENIT:')) else ''
     return db.execute(select(orders).where(orders.c.token == value, orders.c.event_id == event_id)).mappings().first()
 
 @app.post('/lookup', dependencies=[Depends(role)])

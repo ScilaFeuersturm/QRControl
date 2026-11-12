@@ -1,6 +1,7 @@
+import { brand } from '../config/brand';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { ComponentProps, PropsWithChildren } from 'react';
-export const palette = { background: '#081426', card: '#11233D', gold: '#E7C784', ink: '#FFF5DF', muted: '#9BACC2', green: '#69DFB2', red: '#FF9B91' };
+export const palette = { background: '#081426', card: '#11233D', gold: brand.accent, ink: '#FFF5DF', muted: '#9BACC2', green: '#69DFB2', red: '#FF9B91' };
 export function Button({ title, onPress, disabled = false, secondary = false }: {title: string; onPress: () => void; disabled?: boolean; secondary?: boolean}) {
  return <Pressable accessibilityRole="button" onPress={onPress} disabled={disabled} style={[styles.button, secondary && styles.secondary, disabled && {opacity: .4}]}><Text style={[styles.buttonText, secondary && {color: palette.gold}]}>{title}</Text></Pressable>;
 }

@@ -1,14 +1,14 @@
 {
   "expo": {
-    "name": "Zenit Access",
-    "slug": "zenit-access",
+    "name": "QRControl",
+    "slug": "qrcontrol",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "dark",
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.zenit.access"
+      "bundleIdentifier": "com.qrcontrol.app"
     },
     "android": {
       "adaptiveIcon": {
@@ -18,7 +18,7 @@
         "monochromeImage": "./assets/android-icon-monochrome.png"
       },
       "predictiveBackGestureEnabled": false,
-      "package": "com.zenit.access",
+      "package": "com.qrcontrol.app",
       "permissions": [
         "android.permission.CAMERA"
       ]
@@ -30,7 +30,7 @@
       [
         "expo-camera",
         {
-          "cameraPermission": "Permitir que Zenit escanee las entradas QR.",
+          "cameraPermission": "Permitir que QRControl escanee las entradas QR.",
           "recordAudioAndroid": false
         }
       ],
@@ -38,17 +38,13 @@
       "expo-router",
       "./plugins/withLocalTestNetwork"
     ],
-    "scheme": "zenit-access",
+    "scheme": "qrcontrol",
     "extra": {
       "router": {
         "asyncRoutes": {
           "web": true
         }
-      },
-      "eas": {
-        "projectId": "f68ebe22-8878-485e-a056-5e95ae475990"
       }
-    },
-    "owner": "scilafeuersturm"
+    }
   }
 }

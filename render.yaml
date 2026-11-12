@@ -1,9 +1,9 @@
 services:
   - type: web
-    name: zenit-control-qr-api
+    name: qrcontrol-api
     runtime: python
     plan: free
-    branch: zenit
+    branch: main
     region: virginia
     rootDir: backend
     buildCommand: pip install -r requirements.lock.txt
@@ -18,6 +18,6 @@ services:
       - key: SCANNER_KEY
         generateValue: true
       - key: EVENT_CAPACITY
-        value: '84'
+        value: '100'
       - key: DATABASE_URL
         sync: false

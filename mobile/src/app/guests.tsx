@@ -1,3 +1,4 @@
+import { brand } from '../config/brand';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Alert, AppState, FlatList, Pressable, Text, View } from 'react-native';
 import { Redirect, router, useFocusEffect } from 'expo-router';
@@ -67,7 +68,7 @@ export default function Guests() {
  }
  if (!event) return <Redirect href="/" />;
  return <SafeAreaView style={s.screen}><FlatList data={list} keyExtractor={t => String(t.id)} contentContainerStyle={s.content} keyboardShouldPersistTaps="handled" refreshing={busy} onRefresh={reload} onEndReached={loadMore} onEndReachedThreshold={.4} onViewableItemsChanged={viewable}
- ListHeaderComponent={<View style={{gap: 18}}><View style={s.row}><Text style={s.brand}>ZENIT / ACCESS</Text><Pressable onPress={() => router.push('/events')}><Text style={s.muted}>Mis eventos</Text></Pressable></View><Text style={s.title}>{event.name}</Text><Text style={s.muted}>{event.date_label} · {event.venue}</Text>
+ ListHeaderComponent={<View style={{gap: 18}}><View style={s.row}><Text style={s.brand}>{brand.name.toUpperCase()} / ACCESS</Text><Pressable onPress={() => router.push('/events')}><Text style={s.muted}>Mis eventos</Text></Pressable></View><Text style={s.title}>{event.name}</Text><Text style={s.muted}>{event.date_label} · {event.venue}</Text>
  <View style={s.row}>{[['Disponibles', summary?.available], ['Pagadas', summary?.paid], ['Ingresaron', summary?.admitted]].map(([label, value]) => <View key={String(label)}><Text style={s.number}>{value ?? '—'}</Text><Text style={s.muted}>{label}</Text></View>)}</View>{!event.active && <Text style={{color: palette.gold}}>Evento archivado · Historial de solo lectura</Text>}<Text style={s.muted}>Cupo: {event.capacity} personas · {sync}</Text>
  <Button title="Escanear una entrada" disabled={!event.active} onPress={() => router.push('/scan')} />{role === 'admin' && event.active && <Button title="Registrar compra" secondary onPress={() => router.push('/new-ticket')} />}
  <Text style={s.heading}>Lista de invitados</Text><Field value={query} onChangeText={setQuery} placeholder="Buscar titular por nombre" /><View style={{flexDirection: 'row', flexWrap: 'wrap', gap: 8}}>{[['all', 'Todos'], ['absent', 'Por ingresar'], ['present', 'Con ingresos'], ['pending', 'Sin pagar']].map(([value, label]) => <Pressable key={value} onPress={() => setFilter(value)} style={[s.pill, filter === value && {backgroundColor: '#31405A'}]}><Text style={s.muted}>{label}</Text></Pressable>)}</View></View>}

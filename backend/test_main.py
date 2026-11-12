@@ -12,6 +12,8 @@ from database import build_engine, orders
 def client(tmp_path, monkeypatch):
     engine=build_engine('sqlite:///'+str(tmp_path/'test.sqlite3'))
     monkeypatch.setattr(main,'engine',engine)
+    monkeypatch.setattr(main,'CAPACITY',84)
+    monkeypatch.setenv('INITIAL_EVENT_NAME','Evento de prueba')
     monkeypatch.setattr(main,'ADMIN_KEY','a'*32)
     monkeypatch.setattr(main,'SCANNER_KEY','s'*32)
     with TestClient(main.app) as c:
@@ -170,3 +172,15 @@ def test_two_active_events_concurrency_and_archive(client):
     assert scan(client,token).json()['status']=='accepted'
     client.headers['Authorization']='Bearer '+'s'*32
     assert client.patch('/events/1/status',json={'active':False}).status_code==403
+
+def test_generic_installation_starts_without_an_event(client, monkeypatch, tmp_path):
+    from database import initialize
+    monkeypatch.delenv('INITIAL_EVENT_NAME', raising=False)
+    engine=build_engine('sqlite:///'+str(tmp_path/'empty.sqlite3'))
+    monkeypatch.setattr(main,'engine',engine)
+    initialize(engine,100)
+    assert client.get('/events').json()==[]
+    result=client.post('/events',json={'name':'Mi encuentro','date_label':'Diciembre','venue':'Salón','capacity':200})
+    assert result.status_code==201
+    assert result.json()['name']=='Mi encuentro'
+    engine.dispose()

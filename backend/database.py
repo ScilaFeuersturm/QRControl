@@ -85,8 +85,13 @@ def initialize(engine, capacity):
         if db.execute(select(limits.c.id)).first() is None:
             db.execute(limits.insert().values(id=1))
         if db.execute(select(events.c.id).limit(1)).first() is None:
-            db.execute(events.insert().values(id=1, name='Los Secretos del Destino',
-                date_label='06 DIC 2026 · 20:00 a 01:00', venue='Maldito Tano · San Isidro', capacity=capacity))
+            legacy = inspect(db).has_table('tickets')
+            initial_name = os.getenv('INITIAL_EVENT_NAME', '').strip()
+            if not initial_name and not legacy:
+                return
+            db.execute(events.insert().values(id=1, name=initial_name or 'Evento migrado',
+                date_label=os.getenv('INITIAL_EVENT_DATE', 'Fecha a confirmar'),
+                venue=os.getenv('INITIAL_EVENT_VENUE', 'Lugar a confirmar'), capacity=capacity))
             if engine.dialect.name == 'postgresql':
                 db.execute(text("SELECT setval(pg_get_serial_sequence('events','id'), (SELECT MAX(id) FROM events))"))
             # Migración de la primera versión: preserva QR pagados y asistencia.
