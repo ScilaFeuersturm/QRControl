@@ -18,7 +18,8 @@
       },
       "env": {
         "ZENIT_ALLOW_LOCAL_HTTP": "1"
-      }
+      },
+      "autoIncrement": true
     },
     "production": {
       "autoIncrement": true

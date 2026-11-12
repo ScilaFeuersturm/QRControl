@@ -16,7 +16,7 @@ export EVENT_CAPACITY=84
 uvicorn main:app --host 0.0.0.0 --port 8000
 ```
 
-Guardá ambas claves en tu gestor de contraseñas. Para ingresarlas desde el celular, consultalas en tu terminal con `printenv ADMIN_KEY` y `printenv SCANNER_KEY`. No van en el código ni dentro de la APK. `.env.example` es una referencia y no se carga automáticamente.
+Guardá ambas claves en tu gestor de contraseñas. Para ingresarlas desde el celular, consultalas en tu terminal con `printenv ADMIN_KEY` y `printenv SCANNER_KEY`. No van en el código ni dentro de la APK. `.env.example` es una plantilla. El backend carga `backend/.env` automáticamente; las variables del proceso (como las de Render) tienen prioridad.
 
 SQLite se usa por defecto; los datos quedan en `backend/zenit.sqlite3`. Para PostgreSQL configurar `DATABASE_URL=postgresql+psycopg://usuario:clave@host:5432/zenit`. En ese caso DATABASE_URL tiene prioridad sobre DATABASE_PATH. El cupo inicial se establece solo al crear la base: cambiar EVENT_CAPACITY después no modifica eventos existentes.
 
@@ -120,3 +120,11 @@ La auditoría npm de esta versión informa diez alertas moderadas en herramienta
 El evento se controla el **6 de diciembre de 2026**. El Blueprint `render.yaml` apunta a la rama `zenit`, usa una API gratuita de Render y requiere DATABASE_URL de un PostgreSQL externo (por ejemplo Neon Free) con TLS. No usa la base Render existente que vence ese día. Las claves ADMIN_KEY y SCANNER_KEY son generadas por Render y se consultan en la sección Environment del nuevo servicio. La API inicializa el evento real y el ensayo por separado. No compartir la cadena de conexión ni las claves en el repositorio.
 
 Ramas acordadas: `zenit` conserva esta personalización; `main` contiene QRControl genérico.
+
+## Corrección de acceso 1.0.1
+
+La app propone la URL online por defecto, valida URL y clave antes de conectar, dispone de un ojo para mostrar/ocultar y espera hasta 90 segundos al despertar el servidor. La clave incorrecta se informa separada de una falla de red. Los ingresos conservan sus identificadores de operación y no se reintentan automáticamente.
+
+Las claves locales se guardan en `backend/.env`, ignorado por Git, y se cargan mediante python-dotenv. El archivo `.env.example` no guarda las claves reales. Cambiar el archivo local no cambia Render: actualizar allí ADMIN_KEY y SCANNER_KEY y desplegar para activarlas. Ambas deben ser distintas, tener al menos 24 caracteres y utilizar caracteres ASCII sin espacios ni saltos de línea.
+
+Pruebas de red de la app: desde `mobile`, `npm run test:network`.

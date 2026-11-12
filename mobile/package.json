@@ -1,6 +1,6 @@
 {
   "name": "mobile",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "main": "expo-router/entry",
   "dependencies": {
     "eslint": "^9.39.5",
@@ -30,7 +30,8 @@
     "ios": "expo start --ios",
     "web": "expo start --web",
     "lint": "expo lint",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test:network": "node --experimental-strip-types --test tests/api.test.mjs"
   },
   "private": true
 }

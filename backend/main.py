@@ -7,6 +7,10 @@ import secrets
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from uuid import UUID
+from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).with_name('.env'), override=False)
 
 import qrcode
 from fastapi import Depends, FastAPI, HTTPException, Query
