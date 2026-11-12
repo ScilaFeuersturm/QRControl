@@ -3,9 +3,11 @@ import json
 import hmac
 import io
 import os
+import re
 import secrets
+import time
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from uuid import UUID
 from pathlib import Path
 from dotenv import load_dotenv
@@ -13,7 +15,7 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).with_name('.env'), override=False)
 
 import qrcode
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -21,13 +23,15 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import case, func, select
 from sqlalchemy.exc import SQLAlchemyError
 
-from database import build_engine, events, initialize, orders, scanner_users, scans, transaction
+from database import build_engine, events, initialize, orders, scanner_accounts, scans, transaction
 from ticket_design import render_ticket
 
 CAPACITY = int(os.getenv('EVENT_CAPACITY', '84'))
 ADMIN_KEY = os.getenv('ADMIN_KEY', '')
 SCANNER_KEY = os.getenv('SCANNER_KEY', '')
 MAX_SCANNER_USERS = int(os.getenv('MAX_SCANNER_USERS', '3'))
+MAX_LOGIN_FAILURES = 5
+LOCK_MINUTES = 5
 engine = build_engine(os.getenv('DATABASE_URL', 'sqlite:///' + os.getenv('DATABASE_PATH', 'zenit.sqlite3')))
 
 def validate_access_keys():
@@ -51,15 +55,40 @@ app = FastAPI(title='Zenit Control QR', version='0.2.0', lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=[o.strip() for o in os.getenv('CORS_ORIGINS', '*').split(',') if o.strip()], allow_methods=['*'], allow_headers=['Authorization', 'Content-Type', 'Accept'])
 security = HTTPBearer()
 
-def hash_key(key): return hashlib.sha256(key.encode()).hexdigest()
+def hash_password(password, salt=None):
+    salt = salt or secrets.token_bytes(16)
+    digest = hashlib.scrypt(password.encode(), salt=salt, n=2**14, r=8, p=1, dklen=32)
+    return f'scrypt${salt.hex()}${digest.hex()}'
+
+def verify_password(password, stored):
+    try:
+        _, salt, _ = stored.split('$')
+        return hmac.compare_digest(hash_password(password, bytes.fromhex(salt)), stored)
+    except ValueError:
+        return False
+
+DUMMY_HASH = hash_password(secrets.token_urlsafe(16))
+
+def session_token(account_id, version):
+    # Token firmado con ADMIN_KEY: no se guarda en la base y deja de valer si cambia la contraseña o se elimina el usuario.
+    payload = f's1.{account_id}.{version}'
+    return payload + '.' + hmac.new(ADMIN_KEY.encode(), payload.encode(), hashlib.sha256).hexdigest()
+
+def scanner_from_token(token):
+    parts = token.split('.')
+    if len(parts) != 4 or parts[0] != 's1' or not parts[1].isdigit() or not parts[2].isdigit(): return None
+    if not hmac.compare_digest(session_token(int(parts[1]), int(parts[2])), token): return None
+    with engine.connect() as db:
+        row = db.execute(select(scanner_accounts.c.username).where(
+            scanner_accounts.c.id == int(parts[1]), scanner_accounts.c.password_version == int(parts[2]))).first()
+    return row[0] if row else None
 
 def identify(credentials: HTTPAuthorizationCredentials = Depends(security)):
     key = credentials.credentials
     if hmac.compare_digest(key, ADMIN_KEY): return 'admin', 'Administración'
     if SCANNER_KEY and hmac.compare_digest(key, SCANNER_KEY): return 'scanner', 'Escaneo'
-    with engine.connect() as db:
-        name = db.scalar(select(scanner_users.c.name).where(scanner_users.c.key_hash == hash_key(key)))
-    if name is not None: return 'scanner', name
+    username = scanner_from_token(key)
+    if username is not None: return 'scanner', username
     raise HTTPException(401, 'Credencial incorrecta')
 
 def role(identity=Depends(identify)): return identity[0]
@@ -136,39 +165,101 @@ def health():
 def session(identity=Depends(identify)):
     return {'role': identity[0], 'name': identity[1]}
 
-class NewScannerUser(BaseModel):
-    name: str = Field(min_length=1, max_length=60)
-    @field_validator('name')
-    @classmethod
-    def nonblank(cls, value):
-        if not value.strip(): raise ValueError('Ingresá un nombre')
-        return value.strip()
+USERNAME_PATTERN = r'^[a-z0-9._-]{3,30}$'
 
-def public_scanner(row): return {'id': row['id'], 'name': row['name'], 'created_at': row['created_at']}
+class ScannerPassword(BaseModel):
+    password: str = Field(min_length=8, max_length=128)
+    @field_validator('password')
+    @classmethod
+    def no_blank(cls, value):
+        if not value.strip(): raise ValueError('La contraseña no puede estar vacía')
+        if value != value.strip(): raise ValueError('La contraseña no puede empezar ni terminar con espacios')
+        return value
+
+class NewScannerUser(ScannerPassword):
+    username: str = Field(min_length=3, max_length=30)
+    @field_validator('username', mode='before')
+    @classmethod
+    def normalize_username(cls, value):
+        value = str(value).strip().lower()
+        if not re.fullmatch(USERNAME_PATTERN, value):
+            raise ValueError('El usuario debe tener entre 3 y 30 caracteres: letras sin acentos, números, punto, guion o guion bajo')
+        return value
+
+class Login(BaseModel):
+    username: str = Field(min_length=1, max_length=60)
+    password: str = Field(min_length=1, max_length=128)
+
+def public_scanner(row): return {'id': row['id'], 'username': row['username'], 'created_at': row['created_at']}
+
+@app.post('/login')
+def login(data: Login, request: Request):
+    username = data.username.strip().lower()
+    client = request.client.host if request.client else 'desconocido'
+    if not ip_allowed(client):
+        raise HTTPException(429, 'Demasiados intentos desde este dispositivo. Esperá unos minutos y volvé a intentar.')
+    with transaction(engine) as db:
+        row = db.execute(select(scanner_accounts).where(scanner_accounts.c.username == username).with_for_update()).mappings().first()
+        if row and row['locked_until'] and row['locked_until'] > now():
+            raise HTTPException(429, f'Usuario bloqueado por intentos fallidos. Esperá {LOCK_MINUTES} minutos y volvé a intentar.')
+        # Sin usuario también se calcula un hash, para no revelar por el tiempo de respuesta qué usuarios existen.
+        valid = verify_password(data.password, row['password_hash'] if row else DUMMY_HASH)
+        if row and valid:
+            db.execute(scanner_accounts.update().where(scanner_accounts.c.id == row['id']).values(failed_attempts=0, locked_until=None))
+            return {'token': session_token(row['id'], row['password_version']), 'role': 'scanner', 'name': row['username']}
+        register_ip_failure(client)
+        if row:
+            failures = row['failed_attempts'] + 1
+            locked = (datetime.now(timezone.utc) + timedelta(minutes=LOCK_MINUTES)).isoformat() if failures >= MAX_LOGIN_FAILURES else None
+            db.execute(scanner_accounts.update().where(scanner_accounts.c.id == row['id']).values(
+                failed_attempts=0 if locked else failures, locked_until=locked))
+    raise HTTPException(401, 'Usuario o contraseña incorrectos')
+
+# Límite por dispositivo en memoria: alcanza para una sola instancia y frena pruebas masivas contra varios usuarios.
+IP_WINDOW_SECONDS, IP_MAX_FAILURES = 15 * 60, 20
+ip_failures: dict[str, list[float]] = {}
+
+def ip_allowed(client):
+    recent = [t for t in ip_failures.get(client, []) if time.monotonic() - t < IP_WINDOW_SECONDS]
+    ip_failures[client] = recent
+    return len(recent) < IP_MAX_FAILURES
+
+def register_ip_failure(client):
+    ip_failures.setdefault(client, []).append(time.monotonic())
 
 @app.get('/scanner-users', dependencies=[Depends(admin)])
 def list_scanner_users():
     with engine.connect() as db:
-        rows = db.execute(select(scanner_users).order_by(scanner_users.c.id)).mappings()
+        rows = db.execute(select(scanner_accounts).order_by(scanner_accounts.c.id)).mappings()
         return {'max': MAX_SCANNER_USERS, 'users': [public_scanner(r) for r in rows]}
 
 @app.post('/scanner-users', status_code=201, dependencies=[Depends(admin)])
 def create_scanner_user(data: NewScannerUser):
+    if data.password.lower() == data.username: raise HTTPException(422, 'La contraseña no puede ser igual al usuario')
     with transaction(engine, quota=True) as db:
-        if db.scalar(select(func.count()).select_from(scanner_users)) >= MAX_SCANNER_USERS:
+        if db.scalar(select(func.count()).select_from(scanner_accounts)) >= MAX_SCANNER_USERS:
             raise HTTPException(409, f'Ya hay {MAX_SCANNER_USERS} usuarios de escaneo. Eliminá uno para crear otro.')
-        if db.scalar(select(scanner_users.c.id).where(func.lower(scanner_users.c.name) == data.name.lower())) is not None:
+        if db.scalar(select(scanner_accounts.c.id).where(scanner_accounts.c.username == data.username)) is not None:
             raise HTTPException(409, 'Ya existe un usuario con ese nombre')
-        key = secrets.token_urlsafe(24)
-        result = db.execute(scanner_users.insert().values(name=data.name, key_hash=hash_key(key), created_at=now()))
-        row = db.execute(select(scanner_users).where(scanner_users.c.id == result.inserted_primary_key[0])).mappings().one()
-        # La clave se devuelve una sola vez; después no se puede recuperar, solo eliminar el usuario y crear otro.
-        return {**public_scanner(row), 'key': key}
+        result = db.execute(scanner_accounts.insert().values(username=data.username, password_hash=hash_password(data.password),
+            password_version=1, failed_attempts=0, created_at=now()))
+        return public_scanner(db.execute(select(scanner_accounts).where(scanner_accounts.c.id == result.inserted_primary_key[0])).mappings().one())
+
+@app.patch('/scanner-users/{user_id}/password', dependencies=[Depends(admin)])
+def change_scanner_password(user_id: int, data: ScannerPassword):
+    with transaction(engine, quota=True) as db:
+        row = db.execute(select(scanner_accounts).where(scanner_accounts.c.id == user_id).with_for_update()).mappings().first()
+        if row is None: raise HTTPException(404, 'Usuario inexistente')
+        if data.password.lower() == row['username']: raise HTTPException(422, 'La contraseña no puede ser igual al usuario')
+        # Cambiar la contraseña cierra las sesiones abiertas de ese usuario y lo desbloquea.
+        db.execute(scanner_accounts.update().where(scanner_accounts.c.id == user_id).values(password_hash=hash_password(data.password),
+            password_version=row['password_version'] + 1, failed_attempts=0, locked_until=None))
+        return public_scanner(row)
 
 @app.delete('/scanner-users/{user_id}', status_code=204, dependencies=[Depends(admin)])
 def delete_scanner_user(user_id: int):
     with transaction(engine, quota=True) as db:
-        if db.execute(scanner_users.delete().where(scanner_users.c.id == user_id)).rowcount == 0:
+        if db.execute(scanner_accounts.delete().where(scanner_accounts.c.id == user_id)).rowcount == 0:
             raise HTTPException(404, 'Usuario inexistente')
     return Response(status_code=204)
 
@@ -194,6 +285,7 @@ def event_status(event_id: int, data: EventStatus):
         if data.active and not row['active']: require_event_slot(db)
         db.execute(events.update().where(events.c.id == event_id).values(active=data.active))
         return dict(get_event(db, event_id))
+
 
 @app.get('/summary', dependencies=[Depends(role)])
 def summary(event_id: int = 1):

@@ -129,7 +129,11 @@ Las claves locales se guardan en `backend/.env`, ignorado por Git, y se cargan m
 
 ## Usuarios de escaneo
 
-Desde «Mis eventos» → «Usuarios de escaneo», administración crea hasta tres usuarios (MAX_SCANNER_USERS). Cada uno recibe una clave propia que se muestra una sola vez; en la base se guarda solo su hash. Con esa clave el usuario entra a la app y solo puede consultar QR y registrar ingresos. Eliminar un usuario revoca su acceso de inmediato. SCANNER_KEY es opcional: si queda configurada, sigue funcionando como una clave de escaneo compartida adicional; para que solo ingresen los tres usuarios, dejarla vacía o eliminarla en el servidor.
+Desde «Mis eventos» → «Usuarios de escaneo», administración crea hasta tres usuarios (MAX_SCANNER_USERS) con usuario y contraseña elegidos (usuario de 3 a 30 caracteres en minúscula; contraseña de al menos 8 caracteres). El personal de puerta ingresa en la app con ese usuario y contraseña y solo puede consultar QR y registrar ingresos. Administración ingresa dejando el usuario vacío y usando ADMIN_KEY.
+
+Las contraseñas se guardan con scrypt. El inicio de sesión devuelve un token firmado con ADMIN_KEY: cambiar la contraseña o eliminar el usuario cierra sus sesiones, y cambiar ADMIN_KEY cierra todas. Tras cinco intentos fallidos el usuario queda bloqueado cinco minutos (cambiar su contraseña lo desbloquea), y cada dispositivo admite hasta veinte fallos cada quince minutos. SCANNER_KEY es opcional: si queda configurada, sigue funcionando como una clave de escaneo compartida adicional; para que solo ingresen los tres usuarios, dejarla vacía en el servidor.
+
+La tabla `scanner_users` de la versión anterior (claves generadas) ya no se usa; esos usuarios deben recrearse con usuario y contraseña.
 
 Administración puede trabajar desde la PC con la versión web: desde `mobile`, `npm run web`.
 
