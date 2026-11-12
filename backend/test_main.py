@@ -1,0 +1,172 @@
+import sqlite3
+from concurrent.futures import ThreadPoolExecutor
+from uuid import uuid4
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import select
+import main
+from database import build_engine, orders
+
+@pytest.fixture
+def client(tmp_path, monkeypatch):
+    engine=build_engine('sqlite:///'+str(tmp_path/'test.sqlite3'))
+    monkeypatch.setattr(main,'engine',engine)
+    monkeypatch.setattr(main,'ADMIN_KEY','a'*32)
+    monkeypatch.setattr(main,'SCANNER_KEY','s'*32)
+    with TestClient(main.app) as c:
+        c.headers['Authorization']='Bearer '+'a'*32
+        yield c
+    engine.dispose()
+
+def issue(c, quantity=1, paid=True, event_id=1):
+    r=c.post(f'/tickets?event_id={event_id}',json={'name':'Invitada','quantity':quantity,'table_name':'4'})
+    assert r.status_code==201, r.text
+    ticket=r.json()
+    if paid:
+        r=c.patch(f"/tickets/{ticket['id']}/payment?event_id={event_id}",json={'paid':True})
+        assert r.status_code==200,r.text
+    with main.engine.connect() as db:
+        token=db.scalar(select(orders.c.token).where(orders.c.id==ticket['id']))
+    return ticket['id'], 'ZENIT:'+token if token else None
+
+def scan(c, token, quantity=1, request_id=None, event_id=1):
+    return c.post(f'/check-in?event_id={event_id}',json={'token':token,'quantity':quantity,'request_id':request_id or str(uuid4())})
+
+def test_partial_group_and_retry(client):
+    ticket_id,token=issue(client,4)
+    preview=client.post('/lookup',json={'token':token}).json()
+    assert preview['ticket']['remaining']==4
+    assert client.get('/summary').json()['admitted']==0
+    request_id=str(uuid4())
+    first=scan(client,token,2,request_id).json()
+    assert first['status']=='accepted' and first['ticket']['remaining']==2
+    assert scan(client,token,2,request_id).json()==first
+    assert client.get('/summary').json()['admitted']==2
+    assert scan(client,token,1,request_id).status_code==409
+    assert scan(client,token,3).json()['status']=='insufficient'
+    assert scan(client,token,2).json()['ticket']['remaining']==0
+    assert scan(client,token).json()['status']=='used'
+    assert client.patch(f'/tickets/{ticket_id}/payment',json={'paid':False}).status_code==409
+
+def test_concurrent_counts_and_idempotency(client):
+    _,token=issue(client,4)
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results=list(pool.map(lambda _:scan(client,token).json()['status'],range(8)))
+    assert results.count('accepted')==4
+    assert results.count('used')==4
+    assert client.get('/summary').json()['admitted']==4
+    _,other=issue(client,3)
+    request_id=str(uuid4())
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results=list(pool.map(lambda _:scan(client,other,2,request_id).json(),range(8)))
+    assert all(r==results[0] for r in results)
+    assert client.get('/summary').json()['admitted']==6
+
+def test_payment_generation_revocation(client):
+    ticket_id,token=issue(client,3,False)
+    assert token is None
+    assert client.get(f'/tickets/{ticket_id}/invitation').status_code==409
+    client.patch(f'/tickets/{ticket_id}/payment',json={'paid':True})
+    with main.engine.connect() as db:token='ZENIT:'+db.scalar(select(orders.c.token).where(orders.c.id==ticket_id))
+    assert client.get(f'/tickets/{ticket_id}/invitation').content.startswith(b'\x89PNG')
+    client.patch(f'/tickets/{ticket_id}/payment',json={'paid':True})
+    assert client.post('/lookup',json={'token':token}).json()['status']=='available'
+    client.patch(f'/tickets/{ticket_id}/payment',json={'paid':False})
+    assert scan(client,token).json()['status']=='unknown'
+    assert client.get('/summary').json()['available']==84
+    assert scan(client,'ZENIT:inventado').json()['status']=='unknown'
+
+def test_capacity_concurrent_payments(client):
+    issue(client,82)
+    first,_=issue(client,2,False);second,_=issue(client,2,False)
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        statuses=list(pool.map(lambda id:client.patch(f'/tickets/{id}/payment',json={'paid':True}).status_code,[first,second]))
+    assert sorted(statuses)==[200,409]
+    summary=client.get('/summary').json()
+    assert summary['paid']==84 and summary['available']==0
+
+def test_event_isolation_permissions_pagination(client):
+    r=client.post('/events',json={'name':'Otro evento','date_label':'2027','venue':'Lugar','capacity':500})
+    event_id=r.json()['id']
+    ticket_id,token=issue(client,4)
+    assert scan(client,token,event_id=event_id).json()['status']=='unknown'
+    assert client.get(f'/tickets/{ticket_id}/qr?event_id={event_id}').status_code==404
+    assert client.get(f'/summary?event_id={event_id}').json()['available']==500
+    issue(client,2)
+    page=client.get('/tickets?limit=1').json()
+    assert len(page)==1
+    assert client.get(f"/tickets?before_id={page[0]['id']}").json()[0]['id']==ticket_id
+    client.headers['Authorization']='Bearer '+'s'*32
+    assert 'phone' not in client.get('/tickets').json()[0]
+    assert client.post('/tickets',json={'name':'Otra'}).status_code==403
+    assert client.get(f'/tickets/{ticket_id}/invitation').status_code==403
+    client.headers['Authorization']='Bearer wrong'
+    assert client.get('/summary').status_code==401
+
+def test_validation_and_attendance_filters(client):
+    assert client.post('/tickets',json={'name':'  '}).status_code==422
+    assert client.post('/tickets',json={'name':'Ana','quantity':0}).status_code==422
+    _,token=issue(client,3)
+    scan(client,token,1)
+    assert len(client.get('/tickets?attendance=present').json())==1
+    assert len(client.get('/tickets?attendance=absent').json())==1
+    assert client.get('/summary').json()['admitted']==1
+
+def test_demo_pack_separate_and_reset(client, tmp_path, monkeypatch):
+    import seed_demo
+    monkeypatch.setattr(seed_demo, 'engine', main.engine)
+    before=client.get('/summary').json()
+    manifest=seed_demo.seed(tmp_path/'qr')
+    assert len(manifest['tickets'])==10
+    assert len({t['code'] for t in manifest['tickets']})==10
+    assert sum(t['quantity'] for t in manifest['tickets'])==19
+    assert client.get('/summary').json()==before
+    demo_event=manifest['event_id']
+    token=manifest['tickets'][0]['code']
+    assert scan(client,token).json()['status']=='unknown'
+    assert scan(client,token,event_id=demo_event).json()['status']=='accepted'
+    second=seed_demo.seed(tmp_path/'qr')
+    assert second['tickets'][0]['code']==token
+    reset=seed_demo.seed(tmp_path/'qr',reset=True)
+    assert reset['tickets'][0]['code']!=token
+    assert scan(client,token,event_id=demo_event).json()['status']=='unknown'
+    assert client.get(f'/summary?event_id={demo_event}').json()['admitted']==0
+
+def test_migrate_original_database(tmp_path):
+    from database import initialize
+    path=tmp_path/'old.sqlite3'
+    db=sqlite3.connect(path)
+    db.executescript('''CREATE TABLE tickets(id INTEGER PRIMARY KEY,name TEXT,phone TEXT,table_name TEXT,paid INTEGER,token TEXT,used_at TEXT,created_at TEXT);
+    INSERT INTO tickets VALUES(1,'Titular','','1',1,'token-legacy','2026-11-01','2026-10-01');
+    INSERT INTO tickets VALUES(2,'Reserva','','1',0,'no-issued',NULL,'2026-10-01');''')
+    db.commit();db.close()
+    engine=build_engine('sqlite:///'+str(path))
+    initialize(engine,84);initialize(engine,84)
+    with engine.connect() as db:
+        rows=list(db.execute(select(orders).order_by(orders.c.id)).mappings())
+        assert len(rows)==2
+        assert rows[0]['token']=='token-legacy' and rows[0]['admitted_count']==1
+        assert rows[1]['token'] is None
+    engine.dispose()
+
+def test_two_active_events_concurrency_and_archive(client):
+    payload={'name':'Nuevo evento','date_label':'2027','venue':'Lugar','capacity':100}
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        responses=list(pool.map(lambda _:client.post('/events',json=payload),range(3)))
+    assert sorted(r.status_code for r in responses)==[201,409,409]
+    second=next(r.json() for r in responses if r.status_code==201)
+    ticket_id,token=issue(client,2)
+    assert client.patch('/events/1/status',json={'active':False}).status_code==200
+    assert scan(client,token).status_code==409
+    assert client.get(f'/tickets/{ticket_id}/invitation').status_code==409
+    assert client.post('/tickets',json={'name':'Persona'}).status_code==409
+    assert len(client.get('/tickets').json())==1
+    third=client.post('/events',json=payload)
+    assert third.status_code==201
+    assert client.patch('/events/1/status',json={'active':True}).status_code==409
+    client.patch(f"/events/{second['id']}/status",json={'active':False})
+    assert client.patch('/events/1/status',json={'active':True}).status_code==200
+    assert scan(client,token).json()['status']=='accepted'
+    client.headers['Authorization']='Bearer '+'s'*32
+    assert client.patch('/events/1/status',json={'active':False}).status_code==403

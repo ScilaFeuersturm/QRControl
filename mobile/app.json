@@ -1,0 +1,54 @@
+{
+  "expo": {
+    "name": "Zenit Access",
+    "slug": "zenit-access",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.zenit.access"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.zenit.access",
+      "permissions": [
+        "android.permission.CAMERA"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png"
+    },
+    "plugins": [
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Permitir que Zenit escanee las entradas QR.",
+          "recordAudioAndroid": false
+        }
+      ],
+      "expo-sharing",
+      "expo-router",
+      "./plugins/withLocalTestNetwork"
+    ],
+    "scheme": "zenit-access",
+    "extra": {
+      "router": {
+        "asyncRoutes": {
+          "web": true
+        }
+      },
+      "eas": {
+        "projectId": "f68ebe22-8878-485e-a056-5e95ae475990"
+      }
+    },
+    "owner": "scilafeuersturm"
+  }
+}

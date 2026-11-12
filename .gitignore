@@ -1,0 +1,13 @@
+.venv/
+node_modules/
+.expo/
+.env
+*.sqlite3*
+__pycache__/
+.pytest_cache/
+.env.*
+!.env.example
+.DS_Store
+credentials.json
+*.jks
+*.keystore

@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: zenit-control-qr-api
+    runtime: python
+    plan: free
+    branch: zenit
+    region: virginia
+    rootDir: backend
+    buildCommand: pip install -r requirements.lock.txt
+    startCommand: python prepare_deploy.py && exec uvicorn main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
+    autoDeployTrigger: 'off'
+    envVars:
+      - key: PYTHON_VERSION
+        value: '3.14.10'
+      - key: ADMIN_KEY
+        generateValue: true
+      - key: SCANNER_KEY
+        generateValue: true
+      - key: EVENT_CAPACITY
+        value: '84'
+      - key: DATABASE_URL
+        sync: false
