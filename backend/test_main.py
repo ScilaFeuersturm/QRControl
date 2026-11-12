@@ -185,31 +185,70 @@ def test_generic_installation_starts_without_an_event(client, monkeypatch, tmp_p
     assert result.json()['name']=='Mi encuentro'
     engine.dispose()
 
-def test_scanner_users_limit_access_and_revocation(client, monkeypatch):
+def login(c, username, password):
+    return c.post('/login', json={'username': username, 'password': password}, headers={'Authorization': ''})
+
+def test_scanner_users_with_password_limit_access_and_revocation(client, monkeypatch):
     monkeypatch.setattr(main,'SCANNER_KEY','')
-    admin_headers=dict(client.headers)
+    main.ip_failures.clear()
     created=[]
-    for name in ['Puerta 1','Puerta 2','Puerta 3']:
-        r=client.post('/scanner-users',json={'name':name})
+    for name in ['puerta1','puerta2','puerta3']:
+        r=client.post('/scanner-users',json={'username':name,'password':'zenit2026'})
         assert r.status_code==201, r.text
-        assert len(r.json()['key'])>=24
+        assert set(r.json())=={'id','username','created_at'}
         created.append(r.json())
-    r=client.post('/scanner-users',json={'name':'Puerta 4'})
+    r=client.post('/scanner-users',json={'username':'puerta4','password':'zenit2026'})
     assert r.status_code==409 and '3 usuarios' in r.json()['detail']
     listing=client.get('/scanner-users').json()
-    assert listing['max']==3 and [u['name'] for u in listing['users']]==['Puerta 1','Puerta 2','Puerta 3']
-    assert all('key' not in u and 'key_hash' not in u for u in listing['users'])
+    assert listing['max']==3 and [u['username'] for u in listing['users']]==['puerta1','puerta2','puerta3']
+    # Inicio de sesión: insensible a mayúsculas en el usuario, sensible en la contraseña.
+    assert login(client,'puerta1','ZENIT2026').status_code==401
+    ok=login(client,' Puerta1 ','zenit2026')
+    assert ok.status_code==200 and ok.json()['name']=='puerta1'
+    scanner={'Authorization':'Bearer '+ok.json()['token']}
+    assert client.get('/session',headers=scanner).json()=={'role':'scanner','name':'puerta1','max_active_events':2}
     _,token=issue(client,2)
-    scanner={'Authorization':'Bearer '+created[0]['key']}
-    assert client.get('/session',headers=scanner).json()=={'role':'scanner','name':'Puerta 1','max_active_events':2}
     r=client.post('/check-in',json={'token':token,'quantity':1,'request_id':str(uuid4())},headers=scanner)
     assert r.json()['status']=='accepted'
     assert client.get('/scanner-users',headers=scanner).status_code==403
-    assert client.post('/scanner-users',json={'name':'X'},headers=scanner).status_code==403
     assert client.post('/tickets',json={'name':'X'},headers=scanner).status_code==403
-    assert client.delete(f"/scanner-users/{created[0]['id']}",headers=admin_headers).status_code==204
+    # Un token alterado no sirve.
+    forged=ok.json()['token'][:-1]+('0' if ok.json()['token'][-1]!='0' else '1')
+    assert client.get('/session',headers={'Authorization':'Bearer '+forged}).status_code==401
+    # Cambiar la contraseña cierra la sesión anterior.
+    assert client.patch(f"/scanner-users/{created[0]['id']}/password",json={'password':'nueva-clave'}).status_code==200
     assert client.get('/session',headers=scanner).status_code==401
-    assert client.post('/scanner-users',json={'name':'puerta 2'}).status_code==409
-    assert client.post('/scanner-users',json={'name':'Puerta 4'}).status_code==201
-    assert client.get('/session',headers={'Authorization':'Bearer '+'s'*32}).status_code==401
+    assert login(client,'puerta1','zenit2026').status_code==401
+    assert login(client,'puerta1','nueva-clave').status_code==200
+    # Eliminar el usuario revoca su acceso.
+    s2={'Authorization':'Bearer '+login(client,'puerta2','zenit2026').json()['token']}
+    assert client.delete(f"/scanner-users/{created[1]['id']}").status_code==204
+    assert client.get('/session',headers=s2).status_code==401
     assert client.delete('/scanner-users/999').status_code==404
+
+def test_scanner_user_validation(client):
+    for body in [{'username':'pu','password':'zenit2026'},{'username':'puerta uno','password':'zenit2026'},
+                 {'username':'puertaño','password':'zenit2026'},{'username':'puerta1','password':'corta'},
+                 {'username':'puerta1','password':' espacios '},{'username':'puerta1','password':'PUERTA1'}]:
+        assert client.post('/scanner-users',json=body).status_code==422, body
+    assert client.post('/scanner-users',json={'username':'Puerta1','password':'zenit2026'}).json()['username']=='puerta1'
+    assert client.post('/scanner-users',json={'username':'PUERTA1','password':'zenit2026'}).status_code==409
+
+def test_login_lockout_after_failures(client):
+    main.ip_failures.clear()
+    client.post('/scanner-users',json={'username':'puerta1','password':'zenit2026'})
+    for _ in range(5): assert login(client,'puerta1','mala-clave').status_code==401
+    r=login(client,'puerta1','zenit2026')
+    assert r.status_code==429 and 'bloqueado' in r.json()['detail']
+    # El administrador lo desbloquea cambiando la contraseña.
+    uid=client.get('/scanner-users').json()['users'][0]['id']
+    client.patch(f'/scanner-users/{uid}/password',json={'password':'otra-clave'})
+    assert login(client,'puerta1','otra-clave').status_code==200
+    assert login(client,'nadie','zenit2026').status_code==401
+
+def test_login_limit_per_device(client, monkeypatch):
+    main.ip_failures.clear()
+    monkeypatch.setattr(main,'IP_MAX_FAILURES',3)
+    for _ in range(3): login(client,'nadie','x')
+    assert login(client,'nadie','x').status_code==429
+    main.ip_failures.clear()
