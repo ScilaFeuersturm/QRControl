@@ -184,3 +184,32 @@ def test_generic_installation_starts_without_an_event(client, monkeypatch, tmp_p
     assert result.status_code==201
     assert result.json()['name']=='Mi encuentro'
     engine.dispose()
+
+def test_scanner_users_limit_access_and_revocation(client, monkeypatch):
+    monkeypatch.setattr(main,'SCANNER_KEY','')
+    admin_headers=dict(client.headers)
+    created=[]
+    for name in ['Puerta 1','Puerta 2','Puerta 3']:
+        r=client.post('/scanner-users',json={'name':name})
+        assert r.status_code==201, r.text
+        assert len(r.json()['key'])>=24
+        created.append(r.json())
+    r=client.post('/scanner-users',json={'name':'Puerta 4'})
+    assert r.status_code==409 and '3 usuarios' in r.json()['detail']
+    listing=client.get('/scanner-users').json()
+    assert listing['max']==3 and [u['name'] for u in listing['users']]==['Puerta 1','Puerta 2','Puerta 3']
+    assert all('key' not in u and 'key_hash' not in u for u in listing['users'])
+    _,token=issue(client,2)
+    scanner={'Authorization':'Bearer '+created[0]['key']}
+    assert client.get('/session',headers=scanner).json()=={'role':'scanner','name':'Puerta 1','max_active_events':2}
+    r=client.post('/check-in',json={'token':token,'quantity':1,'request_id':str(uuid4())},headers=scanner)
+    assert r.json()['status']=='accepted'
+    assert client.get('/scanner-users',headers=scanner).status_code==403
+    assert client.post('/scanner-users',json={'name':'X'},headers=scanner).status_code==403
+    assert client.post('/tickets',json={'name':'X'},headers=scanner).status_code==403
+    assert client.delete(f"/scanner-users/{created[0]['id']}",headers=admin_headers).status_code==204
+    assert client.get('/session',headers=scanner).status_code==401
+    assert client.post('/scanner-users',json={'name':'puerta 2'}).status_code==409
+    assert client.post('/scanner-users',json={'name':'Puerta 4'}).status_code==201
+    assert client.get('/session',headers={'Authorization':'Bearer '+'s'*32}).status_code==401
+    assert client.delete('/scanner-users/999').status_code==404

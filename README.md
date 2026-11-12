@@ -57,4 +57,10 @@ Las claves locales se guardan en `backend/.env`, ignorado por Git, y se cargan m
 
 El backend acepta peticiones de otros orígenes (CORS) para poder usar la app web; se puede restringir con CORS_ORIGINS, separando los orígenes con comas.
 
+## Usuarios de escaneo
+
+Desde «Mis eventos» → «Usuarios de escaneo», administración crea hasta tres usuarios (MAX_SCANNER_USERS). Cada uno recibe una clave propia que se muestra una sola vez; en la base se guarda solo su hash. Con esa clave el usuario entra a la app y solo puede consultar QR y registrar ingresos. Eliminar un usuario revoca su acceso de inmediato. SCANNER_KEY es opcional: si queda configurada, sigue funcionando como una clave de escaneo compartida adicional; para que solo ingresen los tres usuarios, dejarla vacía o eliminarla en el servidor.
+
+Administración puede trabajar desde la PC con la versión web: desde `mobile`, `npm run web`.
+
 Pruebas de red de la app: desde `mobile`, `npm run test:network`.

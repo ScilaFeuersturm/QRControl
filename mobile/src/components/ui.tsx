@@ -1,6 +1,6 @@
 import { brand } from '../config/brand';
 import { useState } from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Platform, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import type { ComponentProps, PropsWithChildren } from 'react';
 export const palette = { background: '#081426', card: '#11233D', gold: brand.accent, ink: '#FFF5DF', muted: '#9BACC2', green: '#69DFB2', red: '#FF9B91' };
 export function Button({ title, onPress, disabled = false, secondary = false }: {title: string; onPress: () => void; disabled?: boolean; secondary?: boolean}) {
@@ -16,6 +16,14 @@ export function PasswordField(props: Omit<ComponentProps<typeof TextInput>, 'sec
    {!visible && <View accessible={false} style={styles.eyeSlash} />}
   </Pressable>
  </View>;
+}
+// Alert.alert no muestra nada en la versión web: en la PC se usan los diálogos del navegador.
+export function notify(title: string, message: string) {
+ if (Platform.OS === 'web') window.alert(`${title}\n\n${message}`); else Alert.alert(title, message);
+}
+export function confirmAction(title: string, message: string, confirmText: string, onConfirm: () => void) {
+ if (Platform.OS === 'web') {if (window.confirm(`${title}\n\n${message}`)) onConfirm(); return;}
+ Alert.alert(title, message, [{text: 'Cancelar', style: 'cancel'}, {text: confirmText, style: 'destructive', onPress: onConfirm}]);
 }
 export function Card({children}: PropsWithChildren) { return <View style={styles.card}>{children}</View>; }
 export const styles = StyleSheet.create({

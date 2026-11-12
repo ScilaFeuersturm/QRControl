@@ -62,6 +62,7 @@ export async function requestJson<T>(baseUrl: string, path: string, options: Req
       const detail = value && typeof value === 'object' && 'detail' in value ? (value as {detail: unknown}).detail : null;
       throw new ApiError(typeof detail === 'string' ? detail : 'No se pudo completar la operación.', response.status);
     }
+    if (response.status === 204) return null as T;
     if (value === null) throw new Error('La URL respondió sin datos de la app. Revisá que sea la URL correcta del servidor.');
     return value as T;
   } catch (error) {
