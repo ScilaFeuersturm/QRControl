@@ -203,7 +203,7 @@ def test_scanner_users_with_password_limit_access_and_revocation(client, monkeyp
     ok=login(client,' Puerta1 ','zenit2026')
     assert ok.status_code==200 and ok.json()['name']=='puerta1'
     scanner={'Authorization':'Bearer '+ok.json()['token']}
-    assert client.get('/session',headers=scanner).json()=={'role':'scanner','name':'puerta1'}
+    assert client.get('/session',headers=scanner).json()=={'role':'scanner','name':'puerta1','can_change_password':True}
     _,token=issue(client,2)
     r=client.post('/check-in',json={'token':token,'quantity':1,'request_id':str(uuid4())},headers=scanner)
     assert r.json()['status']=='accepted'
@@ -249,3 +249,41 @@ def test_login_limit_per_device(client, monkeypatch):
     for _ in range(3): login(client,'nadie','x')
     assert login(client,'nadie','x').status_code==429
     main.ip_failures.clear()
+
+def test_admin_login_with_short_password(client, monkeypatch):
+    main.ip_failures.clear(); main.admin_lock.update(failures=0, until=0.0)
+    monkeypatch.setattr(main,'ADMIN_PASSWORD','')
+    assert login(client,'admin','cualquiera').status_code==401
+    monkeypatch.setattr(main,'ADMIN_PASSWORD','zenit123')
+    r=login(client,' Admin ','zenit123')
+    assert r.status_code==200 and r.json()['role']=='admin'
+    admin={'Authorization':'Bearer '+r.json()['token']}
+    assert client.get('/session',headers=admin).json()=={'role':'admin','name':'Administración','can_change_password':False}
+    assert client.post('/scanner-users',json={'username':'puerta1','password':'zenit2026'},headers=admin).status_code==201
+    assert client.post('/scanner-users',json={'username':'admin','password':'zenit2026'}).status_code==409
+    assert client.patch('/me/password',json={'current_password':'zenit123','password':'otra-clave'},headers=admin).status_code==403
+    # Cambiar ADMIN_PASSWORD en el servidor cierra las sesiones de administración.
+    monkeypatch.setattr(main,'ADMIN_PASSWORD','nueva-clave')
+    assert client.get('/session',headers=admin).status_code==401
+    for _ in range(5): assert login(client,'admin','mala-clave').status_code==401
+    assert login(client,'admin','nueva-clave').status_code==429
+    main.admin_lock.update(failures=0, until=0.0); main.ip_failures.clear()
+    with pytest.raises(RuntimeError):
+        monkeypatch.setattr(main,'ADMIN_PASSWORD','corta'); main.validate_access_keys()
+
+def test_scanner_changes_own_password_and_tokens_expire(client, monkeypatch):
+    main.ip_failures.clear()
+    client.post('/scanner-users',json={'username':'puerta1','password':'zenit2026'})
+    first=login(client,'puerta1','zenit2026').json()['token']
+    second=login(client,'puerta1','zenit2026').json()['token']
+    h={'Authorization':'Bearer '+first}
+    assert client.patch('/me/password',json={'current_password':'mala','password':'nueva-2026'},headers=h).status_code==422
+    assert client.patch('/me/password',json={'current_password':'zenit2026','password':'corta'},headers=h).status_code==422
+    r=client.patch('/me/password',json={'current_password':'zenit2026','password':'nueva-2026'},headers=h)
+    assert r.status_code==200
+    # El dispositivo que cambió sigue conectado con el token nuevo; las otras sesiones se cierran.
+    assert client.get('/session',headers={'Authorization':'Bearer '+r.json()['token']}).status_code==200
+    assert client.get('/session',headers={'Authorization':'Bearer '+second}).status_code==401
+    assert login(client,'puerta1','nueva-2026').status_code==200
+    expired=main.session_token('s',1,2,days=-1)
+    assert client.get('/session',headers={'Authorization':'Bearer '+expired}).status_code==401

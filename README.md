@@ -133,6 +133,12 @@ Desde «Mis eventos» → «Usuarios de escaneo», administración crea hasta tr
 
 Las contraseñas se guardan con scrypt. El inicio de sesión devuelve un token firmado con ADMIN_KEY: cambiar la contraseña o eliminar el usuario cierra sus sesiones, y cambiar ADMIN_KEY cierra todas. Tras cinco intentos fallidos el usuario queda bloqueado cinco minutos (cambiar su contraseña lo desbloquea), y cada dispositivo admite hasta veinte fallos cada quince minutos. SCANNER_KEY es opcional: si queda configurada, sigue funcionando como una clave de escaneo compartida adicional; para que solo ingresen los tres usuarios, dejarla vacía en el servidor.
 
+Administración ingresa con el usuario «admin» y la contraseña definida en ADMIN_PASSWORD (mínimo 8 caracteres, configurada en el servidor). Cambiarla en el servidor cierra las sesiones de administración. Sin ADMIN_PASSWORD, administración puede ingresar dejando el usuario vacío y usando ADMIN_KEY. Cada usuario de puerta puede cambiar su propia contraseña desde «Cambiar mi contraseña»; eso cierra sus otras sesiones.
+
+La app recuerda la sesión en el dispositivo (almacenamiento seguro en el celular, almacenamiento del navegador en la PC) durante 30 días. Solo se guarda el token firmado, nunca la contraseña ni ADMIN_KEY. «Cerrar sesión» lo borra.
+
+En la versión web, los diálogos de confirmación usan los del navegador y la entrada con QR se descarga como imagen en lugar de abrir el menú de compartir.
+
 La tabla `scanner_users` de la versión anterior (claves generadas) ya no se usa; esos usuarios deben recrearse con usuario y contraseña.
 
 Administración puede trabajar desde la PC con la versión web: desde `mobile`, `npm run web`.
