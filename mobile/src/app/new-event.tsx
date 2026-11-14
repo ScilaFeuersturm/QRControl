@@ -1,9 +1,9 @@
 import { brand } from '../config/brand';
 import { useState } from 'react';
-import { Alert, ScrollView, Text } from 'react-native';
+import { ScrollView, Text } from 'react-native';
 import { Redirect, router } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Button, Card, Field, styles as s } from '../components/ui';
+import { Button, Card, Field, notify, styles as s } from '../components/ui';
 import { useSession } from '../state/session';
 import type { Event } from '../state/session';
 export default function NewEvent() {
@@ -12,12 +12,12 @@ export default function NewEvent() {
  async function create() {
   if (busy) return;
   const amount = Number(capacity);
-  if (!Number.isInteger(amount) || amount < 1 || amount > 1000000) {Alert.alert('Cupo incorrecto', 'Ingresá una cantidad entera de personas entre 1 y 1.000.000.'); return;}
+  if (!Number.isInteger(amount) || amount < 1 || amount > 1000000) {notify('Cupo incorrecto', 'Ingresá una cantidad entera de personas entre 1 y 1.000.000.'); return;}
   setBusy(true);
   try {
    const event = await session.api<Event>('/events', 'POST', {name: name.trim(), date_label: date.trim(), venue: venue.trim(), capacity: amount});
    session.setSession({url: session.url, key: session.key, role: session.role, event}); router.replace('/guests');
-  } catch(e) {Alert.alert('Evento sin confirmar', `${e instanceof Error ? e.message : 'Revisá la conexión'}. Consultá Mis eventos antes de reintentar.`, [{text: 'Ver eventos', onPress: () => router.back()}]);}
+  } catch(e) {notify('Evento sin confirmar', `${e instanceof Error ? e.message : 'Revisá la conexión'}. Consultá Mis eventos antes de reintentar.`, () => router.back());}
   finally {setBusy(false);}
  }
  if (session.role !== 'admin') return <Redirect href="/" />;

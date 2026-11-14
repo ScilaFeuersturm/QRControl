@@ -18,12 +18,13 @@ export function PasswordField(props: Omit<ComponentProps<typeof TextInput>, 'sec
  </View>;
 }
 // Alert.alert no muestra nada en la versión web: en la PC se usan los diálogos del navegador.
-export function notify(title: string, message: string) {
- if (Platform.OS === 'web') window.alert(`${title}\n\n${message}`); else Alert.alert(title, message);
+export function notify(title: string, message: string, onClose?: () => void) {
+ if (Platform.OS === 'web') {window.alert(`${title}\n\n${message}`); onClose?.(); return;}
+ Alert.alert(title, message, [{text: 'OK', onPress: onClose}], {cancelable: !onClose});
 }
-export function confirmAction(title: string, message: string, confirmText: string, onConfirm: () => void) {
+export function confirmAction(title: string, message: string, confirmText: string, onConfirm: () => void, destructive = confirmText === 'Eliminar') {
  if (Platform.OS === 'web') {if (window.confirm(`${title}\n\n${message}`)) onConfirm(); return;}
- Alert.alert(title, message, [{text: 'Cancelar', style: 'cancel'}, {text: confirmText, style: 'destructive', onPress: onConfirm}]);
+ Alert.alert(title, message, [{text: 'Cancelar', style: 'cancel'}, {text: confirmText, style: destructive ? 'destructive' : 'default', onPress: onConfirm}]);
 }
 export function Card({children}: PropsWithChildren) { return <View style={styles.card}>{children}</View>; }
 export const styles = StyleSheet.create({

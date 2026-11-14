@@ -36,7 +36,8 @@
       ],
       "expo-sharing",
       "expo-router",
-      "./plugins/withLocalTestNetwork"
+      "./plugins/withLocalTestNetwork",
+      "expo-secure-store"
     ],
     "scheme": "qrcontrol",
     "extra": {
